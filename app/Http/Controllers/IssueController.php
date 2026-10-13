@@ -18,7 +18,7 @@ class IssueController extends Controller
             return response()->json(['message' => 'Unauthenticated.'], 401);
         }
 
-        $issues = Issue::where('tenant_id', $user->tenant_id)->get();
+        $issues = Issue::with('reporter')->where('tenant_id', $user->tenant_id)->get();
 
         return response()->json([
             'issues' => $issues->map(fn (Issue $issue) => [
@@ -38,6 +38,10 @@ class IssueController extends Controller
         $user = $request->user();
         if ($user === null) {
             return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+
+        if ($issue->tenant_id !== $user->tenant_id) {
+            return response()->json(['message' => 'Forbidden.'], 403);
         }
 
         return response()->json([

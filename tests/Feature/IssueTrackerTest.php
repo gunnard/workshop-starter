@@ -165,7 +165,7 @@ it('a user cannot view another tenant issue', function () {
     $this->actingAs($userA)
         ->get('/issues/'.$issueB->id)
         ->assertStatus(403);
-})->todo();
+});
 
 it('listing issues does not trigger an N+1 on the reporter', function () {
     $tenant = Tenant::factory()->create();
@@ -183,4 +183,4 @@ it('listing issues does not trigger an N+1 on the reporter', function () {
 
     // Correct: eager-loaded, so ~2 select queries (issues + reporters).
     expect($queries)->toBeLessThanOrEqual(2);
-})->todo();
+});
