@@ -104,6 +104,37 @@ it('the issue show requires authentication', function () {
     $this->get('/issues/'.$issue->id)->assertStatus(401);
 });
 
+// --- Bulk close ---
+
+it('bulk-closes the given issues', function () {
+    $tenant = Tenant::factory()->create();
+    $user = User::factory()->create(['tenant_id' => $tenant->id]);
+    $issues = Issue::factory()->count(2)->create(['tenant_id' => $tenant->id, 'status' => 'open']);
+
+    $this->actingAs($user)
+        ->postJson('/issues/bulk-close', ['ids' => $issues->pluck('id')->all()])
+        ->assertOk()
+        ->assertJson(['closed' => 2]);
+
+    expect(Issue::where('status', 'closed')->count())->toBe(2);
+});
+
+it('bulk close skips issues that are already closed', function () {
+    $tenant = Tenant::factory()->create();
+    $user = User::factory()->create(['tenant_id' => $tenant->id]);
+    $open = Issue::factory()->create(['tenant_id' => $tenant->id, 'status' => 'open']);
+    $done = Issue::factory()->create(['tenant_id' => $tenant->id, 'status' => 'closed']);
+
+    $this->actingAs($user)
+        ->postJson('/issues/bulk-close', ['ids' => [$open->id, $done->id]])
+        ->assertOk()
+        ->assertJson(['closed' => 1]);
+});
+
+it('bulk close requires authentication', function () {
+    $this->postJson('/issues/bulk-close', ['ids' => [1]])->assertStatus(401);
+});
+
 // --- LegacyReportController ---
 
 it('the legacy report returns totals', function () {

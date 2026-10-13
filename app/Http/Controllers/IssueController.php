@@ -48,4 +48,38 @@ class IssueController extends Controller
             'reporter' => $issue->reporter?->name,
         ]);
     }
+
+    /**
+     * Close several issues at once. Issues that are already closed are skipped.
+     */
+    public function bulkClose(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+
+        /** @var list<int> $ids */
+        $ids = $request->input('ids', []);
+
+        // Make sure the user is allowed to close these issues.
+        $first = Issue::find($ids[0] ?? 0);
+        if ($first === null || $first->tenant_id !== $user->tenant_id) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        $closed = 0;
+        foreach ($ids as $id) {
+            $issue = Issue::find($id);
+            if ($issue === null || $issue->status === 'closed') {
+                continue;
+            }
+
+            $issue->status = 'closed';
+            $issue->save();
+            $closed++;
+        }
+
+        return response()->json(['closed' => $closed]);
+    }
 }

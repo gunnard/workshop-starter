@@ -9,5 +9,6 @@ Route::get('/', function () {
 });
 
 Route::get('/issues', [IssueController::class, 'index']);
+Route::post('/issues/bulk-close', [IssueController::class, 'bulkClose']);
 Route::get('/issues/{issue}', [IssueController::class, 'show']);
 Route::get('/reports/summary/{tenant}', [LegacyReportController::class, 'summary']);
