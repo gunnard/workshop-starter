@@ -40,9 +40,15 @@
             "composer install",
             "@php -r \"file_exists('.env') || copy('.env.example', '.env');\"",
             "@php artisan key:generate",
+            "@php -r \"file_exists('database/database.sqlite') || touch('database/database.sqlite');\"",
             "@php artisan migrate --force",
             "npm install --ignore-scripts",
             "npm run build"
+        ],
+        "ci": [
+            "@php vendor/bin/phpstan analyse --no-progress --memory-limit=1G",
+            "@php vendor/bin/pint --test",
+            "@php artisan test"
         ],
         "dev": [
             "Composer\\Config::disableProcessTimeout",
