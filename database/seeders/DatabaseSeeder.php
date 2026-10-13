@@ -31,7 +31,7 @@ class DatabaseSeeder extends Seeder
             'reporter_id' => $alice->id,
         ]);
 
-        // A second tenant to demonstrate cross-tenant leakage.
+        // A second tenant, so there is a tenant boundary to respect.
         $other = Tenant::create(['name' => 'Beta Labs', 'seats_limit' => 2]);
         User::factory()->create([
             'tenant_id' => $other->id,
