@@ -153,7 +153,7 @@ it('a tenant cannot seat more users than its seats_limit', function () {
 
     // Correct: at the limit, a third seat must be denied.
     expect($tenant->canAddUser())->toBeFalse();
-})->todo();
+});
 
 it('a user cannot view another tenant issue', function () {
     $tenantA = Tenant::factory()->create();

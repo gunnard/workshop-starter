@@ -41,6 +41,6 @@ class Tenant extends Model
      */
     public function canAddUser(): bool
     {
-        return $this->users()->count() <= $this->seats_limit;
+        return $this->users()->count() < $this->seats_limit;
     }
 }
