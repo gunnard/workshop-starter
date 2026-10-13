@@ -10,9 +10,10 @@ use Illuminate\Http\Request;
  * A deliberately "legacy" report controller.
  *
  * It is the target of the workshop's refactoring exercise: it has an N+1
- * query (each issue loads its reporter separately), duplicated date logic,
- * no tenant-scoping, and no tests. The exercise is to characterize it and
- * extract one concern at a time without changing behavior.
+ * query (each issue loads its reporter separately), a hard-coded 30-day
+ * window, no authentication or tenant scoping, and only three shallow tests.
+ * The exercise is to characterize it and extract one concern at a time
+ * without changing behavior.
  */
 class LegacyReportController extends Controller
 {
@@ -36,8 +37,7 @@ class LegacyReportController extends Controller
             $byReporter[$reporter] = ($byReporter[$reporter] ?? 0) + 1;
         }
 
-        // Duplicated date handling: the same "30 days ago" threshold is
-        // computed inline in two places below.
+        // Hard-coded date window: the 30-day threshold is computed inline.
         $since = now()->subDays(30);
         $recent = $issues->filter(fn ($issue) => $issue->created_at !== null && $issue->created_at->greaterThanOrEqualTo($since))->count();
 
