@@ -38,9 +38,6 @@ class Tenant extends Model
 
     /**
      * Whether another seat (billed user) may be added to this tenant.
-     *
-     * BUG (off-by-one): this uses `<=` so it allows `seats_limit + 1`
-     * users before reporting full. It should be `< seats_limit`.
      */
     public function canAddUser(): bool
     {

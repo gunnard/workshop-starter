@@ -10,10 +10,6 @@ class IssueController extends Controller
 {
     /**
      * List the authenticated user's tenant issues.
-     *
-     * BUG (N+1): reporters are loaded one query per issue instead of
-     * being eager-loaded. Accessing `$issue->reporter->name` here fires a
-     * query for every row. Fix with `with('reporter')` on the query.
      */
     public function index(Request $request): JsonResponse
     {
@@ -36,10 +32,6 @@ class IssueController extends Controller
 
     /**
      * Show a single issue.
-     *
-     * BUG (authorization gap): any authenticated user can view any issue,
-     * even one belonging to another tenant. There is no check that
-     * `$issue->tenant_id` matches the authenticated user's `tenant_id`.
      */
     public function show(Request $request, Issue $issue): JsonResponse
     {

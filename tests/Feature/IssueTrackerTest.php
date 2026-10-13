@@ -12,10 +12,8 @@ uses(RefreshDatabase::class);
 /**
  * Workshop starter — multi-tenant issue tracker.
  *
- * Three of the bugs in the codebase are documented as `->todo()` tests
- * below (quota off-by-one, cross-tenant authorization gap, N+1 on the
- * issues index). Fix the bug, then remove `->todo()` so the test runs and
- * passes.
+ * Three planted bugs are documented as `->todo()` tests below. Find the
+ * bug, fix it, then remove `->todo()` so the test runs and passes.
  */
 
 // --- Models ---
@@ -154,7 +152,6 @@ it('a tenant cannot seat more users than its seats_limit', function () {
     User::factory()->count(2)->create(['tenant_id' => $tenant->id]);
 
     // Correct: at the limit, a third seat must be denied.
-    // BUG: Tenant::canAddUser() uses `<=`, so this returns true.
     expect($tenant->canAddUser())->toBeFalse();
 })->todo();
 
@@ -165,7 +162,6 @@ it('a user cannot view another tenant issue', function () {
     $issueB = Issue::factory()->create(['tenant_id' => $tenantB->id]);
 
     // Correct: cross-tenant access is denied.
-    // BUG: IssueController::show() has no tenant check, so this returns 200.
     $this->actingAs($userA)
         ->get('/issues/'.$issueB->id)
         ->assertStatus(403);
@@ -186,6 +182,5 @@ it('listing issues does not trigger an N+1 on the reporter', function () {
     $this->actingAs($user)->get('/issues')->assertOk();
 
     // Correct: eager-loaded, so ~2 select queries (issues + reporters).
-    // BUG: reporters load one query per issue (N+1).
     expect($queries)->toBeLessThanOrEqual(2);
 })->todo();

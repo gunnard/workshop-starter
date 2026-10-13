@@ -8,10 +8,8 @@ during the session.
 ## What's here
 
 - Multi-tenant issue tracker: `Tenant` → `User` (seats) → `Issue`.
-- **Three planted bugs**, each documented as a `->todo()` Pest test:
-  1. Off-by-one seat quota (`Tenant::canAddUser()` uses `<=`).
-  2. Cross-tenant authorization gap (`IssueController::show()`).
-  3. N+1 query on the issues index (reporter loaded per row).
+- **Three planted bugs**, each documented as a `->todo()` Pest test. Finding
+  where they live is part of the exercise.
 - A **legacy report controller** (`LegacyReportController`) for the refactoring
   exercise (N+1, duplicated date logic, only three shallow tests).
 - **No `CLAUDE.md` or `AGENTS.md` on `master`.** Writing one is part of the
@@ -57,11 +55,11 @@ git switch ch4-start        # or ch8-start, solution
 
 ## The bugs
 
-| Bug | Where | Test |
-|-----|-------|------|
-| Off-by-one seat quota | `app/Models/Tenant.php` | `a tenant cannot seat more users than its seats_limit` |
-| Authorization gap | `app/Http/Controllers/IssueController.php` | `a user cannot view another tenant issue` |
-| N+1 query | `app/Http/Controllers/IssueController.php` | `listing issues does not trigger an N+1 on the reporter` |
+| Bug | Test that documents it |
+|-----|------------------------|
+| Seat quota off by one | `a tenant cannot seat more users than its seats_limit` |
+| Cross-tenant authorization gap | `a user cannot view another tenant issue` |
+| N+1 query on the issue list | `listing issues does not trigger an N+1 on the reporter` |
 
 ## License
 
