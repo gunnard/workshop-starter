@@ -78,6 +78,28 @@ Then, one step at a time:
 Implement increment 1 only: the route, input handling and authorization. Stop after that.
 ```
 
+## Chapter 6 · The cross-tenant fix in show()
+
+Switch on the test first: in `tests/Feature/IssueTrackerTest.php`, delete `->todo()` from "a user cannot view another tenant issue", then run:
+
+```bash
+php artisan test --filter="another tenant issue"
+```
+
+It fails: expected 403, received 200. In `app/Http/Controllers/IssueController.php`, inside `show()`, add this right after the `if ($user === null) { ... }` check:
+
+```php
+if ($issue->tenant_id !== $user->tenant_id) {
+    return response()->json(['message' => 'Forbidden.'], 403);
+}
+```
+
+Run the tests again; you should see 16 passed, 2 todos. Then commit:
+
+```bash
+git commit -am "Deny cross-tenant issue reads; switch on its test"
+```
+
 ## Chapter 7 · Characterize, then extract one thing
 
 ```text
