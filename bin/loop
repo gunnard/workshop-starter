@@ -1,0 +1,285 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * bin/loop: the workshop's loop, as a script you can run.
+ *
+ *   ticket -> agent -> checks -> (the failure goes back to the agent) -> ... -> a person reviews
+ *
+ * The checks decide when the work is done, not the model. The script never
+ * commits: when it stops, you review the diff, and anything you had to send
+ * back becomes a line in docs/lessons.md, which the next run reads.
+ *
+ * Usage:
+ *   php bin/loop --agent=claude --ticket=docs/tickets/seat-quota.md \
+ *                --accept="a tenant cannot seat more users than its seats_limit"
+ *
+ * See docs/the-loop.md.
+ */
+
+declare(strict_types=1);
+
+// Some tools change their output when they think an AI agent is running them
+// (Pest switches to JSON). The loop runs everything as a person would.
+const AGENT_ENV = ['CLAUDECODE', 'AI_AGENT', 'CLAUDE_CODE_ENTRYPOINT'];
+
+const AGENTS = [
+    'claude' => ['claude', '-p', '{prompt}', '--permission-mode', 'acceptEdits'],
+    'opencode' => ['opencode', 'run', '{prompt}'],
+    'copilot' => ['copilot', '-p', '{prompt}', '--allow-all-tools'],
+];
+
+const FEEDBACK_LINES = 80;
+
+$opts = getopt('', ['agent:', 'ticket:', 'accept:', 'max:', 'allow-dirty', 'help']);
+
+if (isset($opts['help']) || ! isset($opts['agent'], $opts['ticket'], $opts['accept'])) {
+    fwrite(STDERR, <<<'TXT'
+    Usage: php bin/loop --agent=AGENT --ticket=FILE_OR_TEXT --accept="TEST NAME" [--max=3] [--allow-dirty]
+
+      --agent    claude, opencode, copilot, or the path to any command that takes
+                 the prompt as its last argument
+      --ticket   a file such as docs/tickets/seat-quota.md, or the ticket text itself
+      --accept   the name (or part of the name) of the test that proves the ticket
+                 is done. It must NOT pass yet: a check that already passes can't
+                 tell you when you're finished.
+      --max      attempts before the loop gives up (default 3)
+
+    TXT);
+    exit(2);
+}
+
+chdir(dirname(__DIR__));
+
+$agent = (string) $opts['agent'];
+$ticket = is_file((string) $opts['ticket']) ? file_get_contents((string) $opts['ticket']) : (string) $opts['ticket'];
+$accept = (string) $opts['accept'];
+$max = max(1, (int) ($opts['max'] ?? 3));
+$logDir = 'storage/logs/loop/'.date('Ymd-His');
+@mkdir($logDir, 0777, true);
+
+// --- Before the first attempt -------------------------------------------------
+
+if (! isset($opts['allow-dirty']) && trim(capture(['git', 'status', '--porcelain'])[1]) !== '') {
+    stop(2, 'You have uncommitted changes. Commit or stash them first, so the diff at the end is only the agent\'s work (or pass --allow-dirty).');
+}
+
+say('Checking that the acceptance test fails before we start');
+[$status, $output] = acceptance($accept, "$logDir/before-accept.xml");
+note("  \"$accept\": $status");
+if ($status === 'missing') {
+    stop(2, "No test matches \"$accept\". Write the test first: it is how the loop knows when to stop.");
+}
+if ($status === 'passing') {
+    stop(2, "\"$accept\" already passes, so it can't tell you when the ticket is done. Point --accept at a test that fails until the work is finished.");
+}
+
+// --- The loop ---------------------------------------------------------------
+
+$feedback = null;
+
+for ($attempt = 1; $attempt <= $max; $attempt++) {
+    say("Attempt $attempt of $max: $agent is working");
+    $prompt = prompt($ticket, $accept, $feedback, $attempt, $max);
+    file_put_contents("$logDir/attempt-$attempt-prompt.md", $prompt);
+
+    $before = treeState();
+    $code = runAgent($agent, $prompt);
+    if ($code !== 0 && treeState() === $before) {
+        stop(2, "$agent exited with code $code and changed nothing, so retrying won't help. Its output is above (is it installed and signed in?).");
+    }
+    if ($code !== 0) {
+        note("  ($agent exited with code $code but changed files; running the checks anyway)");
+    }
+
+    say("Attempt $attempt of $max: checks");
+
+    [$status, $output] = acceptance($accept, "$logDir/attempt-$attempt-accept.xml");
+    file_put_contents("$logDir/attempt-$attempt-accept.log", $output);
+    note("  acceptance test: $status");
+    if ($status !== 'passing') {
+        $feedback = "The acceptance test \"$accept\" is $status.\n\n".tail($output);
+        continue;
+    }
+
+    [$ci, $output] = capture(['composer', 'ci']);
+    file_put_contents("$logDir/attempt-$attempt-ci.log", $output);
+    note('  composer ci: '.($ci === 0 ? 'passed' : 'FAILED'));
+    if ($ci !== 0) {
+        $feedback = "`composer ci` failed (PHPStan, Pint and the full test suite must all pass).\n\n".tail($output);
+        continue;
+    }
+
+    // Green. One more gate: a test suite the agent edited to pass proves nothing.
+    $removed = removedTestLines();
+    summary();
+    if ($removed !== []) {
+        note("\nThe checks pass, but the agent removed or changed these lines in tests/:");
+        foreach ($removed as $line) {
+            note("    - $line");
+        }
+        stop(3, 'Not done until a person agrees those test changes are right. Read the test diff above before anything else.');
+    }
+
+    stop(0, "Done in $attempt attempt(s). Now it's your turn:\n"
+        ."  1. Review the diff (the Chapter 6 checklist).\n"
+        ."  2. If you had to send anything back, add a line to docs/lessons.md so the next run knows.\n"
+        .'  3. Commit.');
+}
+
+summary();
+stop(1, "Gave up after $max attempts. The last failure is in $logDir. The agent's changes are still in your working tree: review them, or discard them with git checkout -- . && git clean -fd");
+
+// --- Helpers ----------------------------------------------------------------
+
+function prompt(string $ticket, string $accept, ?string $feedback, int $attempt, int $max): string
+{
+    $context = is_file('AGENTS.md') ? file_get_contents('AGENTS.md') : '(no AGENTS.md in this repository)';
+    $lessons = is_file('docs/lessons.md') ? file_get_contents('docs/lessons.md') : '(none yet)';
+
+    $prompt = <<<MD
+    You are working on one ticket in this repository.
+
+    ## Ticket
+
+    $ticket
+
+    ## Project context (AGENTS.md)
+
+    $context
+
+    ## Lessons from earlier tickets (docs/lessons.md)
+
+    $lessons
+
+    ## Definition of done
+
+    - The test named "$accept" runs and passes. If it is marked `->todo()`, remove `->todo()` once the code is fixed.
+    - `composer ci` passes: PHPStan, Pint (code style) and the full test suite.
+    - Do not change what an existing test asserts to make it pass. If you think a test is wrong, stop and say why.
+    - Stay inside the ticket. If you notice other problems, list them at the end of your reply; do not fix them.
+    - Do not commit. A person reviews the diff.
+
+    MD;
+
+    if ($feedback !== null) {
+        $prev = $attempt - 1;
+        $prompt .= "## Attempt $prev of $max did not pass the checks\n\nFix what this output shows, then stop.\n\n```\n$feedback\n```\n";
+    }
+
+    return $prompt;
+}
+
+/** @return array{'passing'|'failing'|'todo'|'missing', string} status and the test output */
+function acceptance(string $filter, string $junit): array
+{
+    @unlink($junit);
+    [, $output] = capture(['php', 'artisan', 'test', '--filter='.$filter, '--log-junit='.$junit]);
+
+    $cases = is_file($junit) ? (simplexml_load_file($junit) ?: null)?->xpath('//testcase') ?? [] : [];
+    if ($cases === []) {
+        return ['missing', $output];
+    }
+    foreach ($cases as $case) {
+        if (isset($case->failure) || isset($case->error)) {
+            return ['failing', $output];
+        }
+    }
+    foreach ($cases as $case) {
+        if (isset($case->skipped)) {
+            return ['todo', $output];
+        }
+    }
+
+    return ['passing', $output];
+}
+
+/** Lines the agent removed or rewrote under tests/, ignoring the ->todo() it was told to drop. */
+function removedTestLines(): array
+{
+    $diff = capture(['git', 'diff', '-U0', '--', 'tests/'])[1];
+    $removed = [];
+    foreach (explode("\n", $diff) as $line) {
+        if (str_starts_with($line, '-') && ! str_starts_with($line, '---')) {
+            $text = trim(substr($line, 1));
+            if ($text !== '' && $text !== '})->todo();') {
+                $removed[] = $text;
+            }
+        }
+    }
+
+    return $removed;
+}
+
+/** A fingerprint of the working tree, to tell whether the agent changed anything. */
+function treeState(): string
+{
+    $untracked = capture(['git', 'ls-files', '--others', '--exclude-standard'])[1];
+    $hashes = '';
+    foreach (array_filter(explode("\n", $untracked)) as $file) {
+        $hashes .= $file.':'.sha1_file($file)."\n";
+    }
+
+    return sha1(capture(['git', 'diff'])[1].$hashes);
+}
+
+function runAgent(string $agent, string $prompt): int
+{
+    $cmd = AGENTS[$agent] ?? [$agent, '{prompt}'];
+    $cmd = array_map(fn (string $part) => $part === '{prompt}' ? $prompt : $part, $cmd);
+
+    $null = PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null';
+    $proc = @proc_open($cmd, [0 => ['file', $null, 'r'], 1 => STDOUT, 2 => STDERR], $pipes, null, env());
+    if (! is_resource($proc)) {
+        stop(2, "Could not start \"$cmd[0]\". Is it installed and on your PATH?");
+    }
+
+    return proc_close($proc);
+}
+
+/** @return array{int, string} exit code and combined output */
+function capture(array $cmd): array
+{
+    $proc = proc_open($cmd, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['redirect', 1]], $pipes, null, env());
+    fclose($pipes[0]);
+    $output = stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+
+    return [proc_close($proc), preg_replace('/\e\[[0-9;]*m/', '', (string) $output)];
+}
+
+function env(): array
+{
+    return array_diff_key(getenv(), array_flip(AGENT_ENV));
+}
+
+function tail(string $output): string
+{
+    return implode("\n", array_slice(explode("\n", trim($output)), -FEEDBACK_LINES));
+}
+
+function summary(): void
+{
+    say('What changed');
+    note(trim(capture(['git', 'status', '--short'])[1]) ?: '  (nothing)');
+    $tests = trim(capture(['git', 'diff', '--', 'tests/'])[1]);
+    if ($tests !== '') {
+        note("\nTest changes (read these first):\n$tests");
+    }
+}
+
+function say(string $text): void
+{
+    fwrite(STDOUT, "\n== $text\n");
+}
+
+function note(string $text): void
+{
+    fwrite(STDOUT, $text."\n");
+}
+
+function stop(int $code, string $text): never
+{
+    fwrite($code === 0 ? STDOUT : STDERR, "\n$text\n");
+    exit($code);
+}

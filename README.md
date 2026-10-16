@@ -62,6 +62,7 @@ Fell behind? Each branch is a known-good starting point:
 | `ch6-start` | `ch4-start` plus a finished bulk-close endpoint, ready to review. |
 | `ch8-start` | Adds the seat-quota fix, with its test switched on (for the mutation exercise). |
 | `solution` | All three bugs fixed and their tests switched on. |
+| `loop` | `bin/loop`: the workshop's steps as one loop you can run. See `docs/the-loop.md`. |
 
 ```bash
 git fetch origin
